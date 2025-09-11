@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -17,6 +17,7 @@ import SettingsPage from './pages/SettingsPage';
 // Main app component with theme switching
 function AppContent() {
   const { state, setTheme } = useApp();
+  const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('token'));
 
   // Load theme from localStorage on mount
   useEffect(() => {
@@ -31,10 +32,24 @@ function AppContent() {
     document.body.className = state.theme === 'dark' ? 'dark' : 'light';
   }, [state.theme]);
 
-  const currentTheme = state.theme === 'dark' ? darkTheme : lightTheme;
+  // Listen for authentication changes
+  useEffect(() => {
+    const handleAuthChange = () => {
+      setIsAuthenticated(!!localStorage.getItem('token'));
+    };
 
-  // Check if user is authenticated
-  const isAuthenticated = !!localStorage.getItem('token');
+    // Listen for custom auth change events
+    window.addEventListener('authChange', handleAuthChange);
+    
+    // Also check on mount
+    handleAuthChange();
+
+    return () => {
+      window.removeEventListener('authChange', handleAuthChange);
+    };
+  }, []);
+
+  const currentTheme = state.theme === 'dark' ? darkTheme : lightTheme;
 
   if (!isAuthenticated) {
     return (

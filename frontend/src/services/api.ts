@@ -1,16 +1,81 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
-import { 
-  DatabaseConnection, 
-  ConnectionTest, 
-  Database, 
-  Table, 
-  TableData, 
-  QueryResult, 
-  DatabaseUser, 
-  ServerInfo,
-  ApiResponse,
-  PaginatedResponse 
-} from '../../shared/types';
+// Types are defined inline to avoid import issues
+interface DatabaseConnection {
+  id: string;
+  name: string;
+  type: 'mysql' | 'mariadb' | 'postgresql';
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  password: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ConnectionTest {
+  success: boolean;
+  message: string;
+  version?: string;
+}
+
+interface Database {
+  name: string;
+  size: number;
+  encoding?: string;
+  collation?: string;
+  tables?: number;
+  views?: number;
+}
+
+interface Table {
+  name: string;
+  type: 'table' | 'view';
+  engine?: string;
+  collation?: string;
+  rows?: number;
+  size?: number;
+  comment?: string;
+}
+
+interface TableData {
+  columns: string[];
+  rows: any[];
+  totalRows: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+interface QueryResult {
+  columns: string[];
+  rows: any[];
+  executionTime: number;
+  insertId?: number;
+  message?: string;
+}
+
+interface DatabaseUser {
+  name: string;
+  host: string;
+  privileges: string[];
+  maxConnections?: number;
+  maxUserConnections?: number;
+  maxQuestions?: number;
+  maxUpdates?: number;
+  passwordExpired?: boolean;
+  accountLocked?: boolean;
+}
+
+interface ServerInfo {
+  version: string;
+  uptime: number;
+  connections: number;
+  maxConnections: number;
+  queriesPerSecond: number;
+  bytesReceived: number;
+  bytesSent: number;
+}
 
 // Create axios instance with base configuration
 const api: AxiosInstance = axios.create({
@@ -87,6 +152,11 @@ export const apiService = {
       const response = await api.get(`/connections/${id}/status`);
       return response.data.data;
     },
+
+    getToken: async (id: string): Promise<{ token: string }> => {
+      const response = await api.post(`/connections/${id}/token`);
+      return response.data.data;
+    },
   },
 
   // Database management
@@ -108,6 +178,14 @@ export const apiService = {
     delete: async (name: string): Promise<void> => {
       await api.delete(`/databases/${name}`);
     },
+
+    rename: async (name: string, newName: string): Promise<void> => {
+      await api.put(`/databases/${name}/rename`, { newName });
+    },
+
+    switch: async (databaseName: string): Promise<void> => {
+      await api.post(`/databases/${databaseName}/switch`);
+    },
   },
 
   // Table management
@@ -126,6 +204,66 @@ export const apiService = {
     }> => {
       const response = await api.get(`/tables/${databaseName}/${tableName}/structure`);
       return response.data.data;
+    },
+
+    create: async (databaseName: string, tableData: {
+      name: string;
+      columns: any[];
+      engine?: string;
+      charset?: string;
+      collation?: string;
+    }): Promise<void> => {
+      await api.post(`/tables/${databaseName}`, tableData);
+    },
+
+    drop: async (databaseName: string, tableName: string): Promise<void> => {
+      await api.delete(`/tables/${databaseName}/${tableName}`);
+    },
+
+    rename: async (databaseName: string, tableName: string, newName: string): Promise<void> => {
+      await api.put(`/tables/${databaseName}/${tableName}/rename`, { newName });
+    },
+
+    // Column management
+    addColumn: async (databaseName: string, tableName: string, columnData: {
+      name: string;
+      type: string;
+      nullable?: boolean;
+      defaultValue?: string;
+      autoIncrement?: boolean;
+      comment?: string;
+      after?: string;
+    }): Promise<void> => {
+      await api.post(`/tables/${databaseName}/${tableName}/columns`, columnData);
+    },
+
+    modifyColumn: async (databaseName: string, tableName: string, columnName: string, columnData: {
+      type?: string;
+      nullable?: boolean;
+      defaultValue?: string;
+      autoIncrement?: boolean;
+      comment?: string;
+      newName?: string;
+    }): Promise<void> => {
+      await api.put(`/tables/${databaseName}/${tableName}/columns/${columnName}`, columnData);
+    },
+
+    dropColumn: async (databaseName: string, tableName: string, columnName: string): Promise<void> => {
+      await api.delete(`/tables/${databaseName}/${tableName}/columns/${columnName}`);
+    },
+
+    // Index management
+    createIndex: async (databaseName: string, tableName: string, indexData: {
+      name: string;
+      columns: string[];
+      type?: 'PRIMARY' | 'UNIQUE' | 'INDEX' | 'FULLTEXT' | 'SPATIAL';
+      comment?: string;
+    }): Promise<void> => {
+      await api.post(`/tables/${databaseName}/${tableName}/indexes`, indexData);
+    },
+
+    dropIndex: async (databaseName: string, tableName: string, indexName: string): Promise<void> => {
+      await api.delete(`/tables/${databaseName}/${tableName}/indexes/${indexName}`);
     },
   },
 
@@ -172,12 +310,33 @@ export const apiService = {
       const response = await api.delete(`/data/${databaseName}/${tableName}/${id}`);
       return response.data.data;
     },
+
+    // Bulk operations
+    bulkInsert: async (databaseName: string, tableName: string, data: any[], columns?: string[]): Promise<{ affectedRows: number; insertId: any }> => {
+      const response = await api.post(`/data/${databaseName}/${tableName}/bulk`, { data, columns });
+      return response.data.data;
+    },
+
+    bulkUpdate: async (databaseName: string, tableName: string, data: any[], whereColumn: string): Promise<{ affectedRows: number }> => {
+      const response = await api.put(`/data/${databaseName}/${tableName}/bulk`, { data, whereColumn });
+      return response.data.data;
+    },
+
+    bulkDelete: async (databaseName: string, tableName: string, whereColumn: string, values: any[]): Promise<{ affectedRows: number }> => {
+      const response = await api.delete(`/data/${databaseName}/${tableName}/bulk`, { data: { whereColumn, values } });
+      return response.data.data;
+    },
   },
 
   // Query execution
   query: {
     execute: async (query: string, params: any[] = [], confirmDangerous = false): Promise<QueryResult> => {
       const response = await api.post('/query/execute', { query, params, confirmDangerous });
+      return response.data.data;
+    },
+
+    explain: async (query: string, params: any[] = []): Promise<QueryResult> => {
+      const response = await api.post('/query/explain', { query, params });
       return response.data.data;
     },
 
@@ -209,8 +368,8 @@ export const apiService = {
       return response.data.data;
     },
 
-    create: async (user: { name: string; password: string; host?: string }): Promise<void> => {
-      await api.post('/users', user);
+    create: async (name: string, password: string, host: string = 'localhost'): Promise<void> => {
+      await api.post('/users', { name, password, host });
     },
 
     grantPrivileges: async (username: string, privileges: string[], database?: string, table?: string): Promise<void> => {
@@ -225,7 +384,7 @@ export const apiService = {
   // Export/Import
   export: {
     exportData: async (options: {
-      format: 'sql' | 'csv' | 'json';
+      format: 'sql' | 'csv' | 'json' | 'xml' | 'tsv';
       tables?: string[];
       dataOnly?: boolean;
       schemaOnly?: boolean;
@@ -238,6 +397,11 @@ export const apiService = {
 
     importData: async (sql: string): Promise<{ success: boolean; message: string; importedRows: number; errors?: string[] }> => {
       const response = await api.post('/export/import', { sql });
+      return response.data.data;
+    },
+
+    importCsv: async (tableName: string, data: any[], columns?: string[], delimiter?: string): Promise<{ success: boolean; message: string; importedRows: number; insertId?: any }> => {
+      const response = await api.post('/export/import-csv', { tableName, data, columns, delimiter });
       return response.data.data;
     },
   },

@@ -2,8 +2,21 @@ import { Router, Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { databaseManager } from '../services/databaseManager';
 import { createError } from '../middleware/errorHandler';
-import { ExportOptions, ImportResult, ApiResponse } from '../../shared/types';
-import { createCsvWriter } from 'csv-writer';
+// Types are defined inline to avoid import issues
+interface ExportOptions {
+  format: 'sql' | 'csv' | 'json' | 'xml' | 'tsv';
+  tables?: string[];
+  dataOnly?: boolean;
+  schemaOnly?: boolean;
+}
+
+interface ImportResult {
+  success: boolean;
+  message: string;
+  importedRows: number;
+  errors?: string[] | undefined;
+}
+// CSV writer functionality is handled manually
 
 const router = Router();
 
@@ -11,7 +24,7 @@ const router = Router();
  * Export database schema and/or data
  */
 router.post('/export', [
-  body('format').isIn(['sql', 'csv', 'json']).withMessage('Format must be sql, csv, or json'),
+  body('format').isIn(['sql', 'csv', 'json', 'xml', 'tsv']).withMessage('Format must be sql, csv, json, xml, or tsv'),
   body('tables').optional().isArray().withMessage('Tables must be an array'),
   body('dataOnly').optional().isBoolean().withMessage('DataOnly must be a boolean'),
   body('schemaOnly').optional().isBoolean().withMessage('SchemaOnly must be a boolean'),
@@ -46,6 +59,10 @@ router.post('/export', [
       exportData = await exportToCsv(connectionId, config, tables);
     } else if (format === 'json') {
       exportData = await exportToJson(connectionId, config, tables);
+    } else if (format === 'xml') {
+      exportData = await exportToXml(connectionId, config, tables);
+    } else if (format === 'tsv') {
+      exportData = await exportToTsv(connectionId, config, tables);
     } else {
       throw createError('Unsupported export format', 400);
     }
@@ -54,7 +71,10 @@ router.post('/export', [
     
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', format === 'sql' ? 'text/plain' : 
-                              format === 'csv' ? 'text/csv' : 'application/json');
+                              format === 'csv' ? 'text/csv' : 
+                              format === 'json' ? 'application/json' :
+                              format === 'xml' ? 'application/xml' :
+                              'text/tab-separated-values');
     
     res.send(exportData);
   } catch (error: any) {
@@ -122,6 +142,73 @@ router.post('/import', async (req: Request, res: Response) => {
 });
 
 /**
+ * Import CSV data
+ */
+router.post('/import-csv', [
+  body('tableName').notEmpty().withMessage('Table name is required'),
+  body('data').isArray({ min: 1 }).withMessage('Data must be a non-empty array'),
+  body('columns').optional().isArray().withMessage('Columns must be an array'),
+  body('delimiter').optional().isString().withMessage('Delimiter must be a string'),
+], async (req: Request, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array(),
+      });
+    }
+
+    const connectionId = req.user?.connectionId;
+    const { tableName, data, columns, delimiter = ',' } = req.body;
+
+    if (!connectionId) {
+      throw createError('No active connection', 400);
+    }
+
+    const config = databaseManager.getConnectionConfig(connectionId);
+    if (!config) {
+      throw createError('Connection not found', 404);
+    }
+
+    if (data.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No data provided for import',
+      });
+    }
+
+    // Get column names from first row if not provided
+    const columnNames = columns || Object.keys(data[0]);
+    
+    // Build bulk insert query
+    const placeholders = data.map(() => `(${columnNames.map(() => '?').join(', ')})`).join(', ');
+    const query = `INSERT INTO \`${config.database}\`.\`${tableName}\` (\`${columnNames.join('`, `')}\`) VALUES ${placeholders}`;
+    
+    // Flatten data for parameters
+    const params = data.flatMap((row: any) => columnNames.map((col: string) => row[col]));
+
+    const result = await databaseManager.executeQuery(connectionId, query, params);
+
+    res.json({
+      success: true,
+      data: {
+        success: true,
+        message: 'CSV import completed successfully',
+        importedRows: result.affectedRows || data.length,
+        insertId: result.insertId,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+/**
  * Export to SQL format
  */
 async function exportToSql(
@@ -151,7 +238,9 @@ async function exportToSql(
       tables = tableRows.map((row: any) => row.table_name);
     }
 
-    for (const tableName of tables) {
+    const tableList = tables || [];
+
+    for (const tableName of tableList) {
       if (!schemaOnly) {
         // Export table structure
         const createTableQuery = `SHOW CREATE TABLE \`${config.database}\`.\`${tableName}\``;
@@ -183,7 +272,7 @@ async function exportToSql(
           
           // Generate INSERT statements
           for (const row of data) {
-            const values = columnNames.map(col => {
+            const values = columnNames.map((col: string) => {
               const value = row[col];
               if (value === null) return 'NULL';
               if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
@@ -220,7 +309,9 @@ async function exportToCsv(connectionId: string, config: any, tables?: string[])
     tables = tableRows.map((row: any) => row.table_name);
   }
 
-  for (const tableName of tables) {
+  const tableList = tables || [];
+
+  for (const tableName of tableList) {
     const dataQuery = config.type === 'mysql'
       ? `SELECT * FROM \`${config.database}\`.\`${tableName}\``
       : `SELECT * FROM "${config.database}"."${tableName}"`;
@@ -237,7 +328,7 @@ async function exportToCsv(connectionId: string, config: any, tables?: string[])
       
       // Add data rows
       for (const row of data) {
-        const values = columns.map(col => {
+        const values = columns.map((col: string) => {
           const value = row[col];
           if (value === null) return '';
           if (typeof value === 'string' && value.includes(',')) {
@@ -273,7 +364,9 @@ async function exportToJson(connectionId: string, config: any, tables?: string[]
     tables = tableRows.map((row: any) => row.table_name);
   }
 
-  for (const tableName of tables) {
+  const tableList = tables || [];
+
+  for (const tableName of tableList) {
     const dataQuery = config.type === 'mysql'
       ? `SELECT * FROM \`${config.database}\`.\`${tableName}\``
       : `SELECT * FROM "${config.database}"."${tableName}"`;
@@ -283,6 +376,104 @@ async function exportToJson(connectionId: string, config: any, tables?: string[]
   }
 
   return JSON.stringify(exportData, null, 2);
+}
+
+/**
+ * Export to XML format
+ */
+async function exportToXml(connectionId: string, config: any, tables?: string[]): Promise<string> {
+  let xmlData = '<?xml version="1.0" encoding="UTF-8"?>\n<database>\n';
+  
+  if (!tables) {
+    const tablesQuery = config.type === 'mysql'
+      ? `SELECT table_name FROM information_schema.tables WHERE table_schema = ? ORDER BY table_name`
+      : `SELECT table_name FROM information_schema.tables WHERE table_catalog = $1 ORDER BY table_name`;
+    
+    const tableRows = await databaseManager.executeQuery(connectionId, tablesQuery, [config.database]);
+    tables = tableRows.map((row: any) => row.table_name);
+  }
+
+  const tableList = tables || [];
+
+  for (const tableName of tableList) {
+    const dataQuery = config.type === 'mysql'
+      ? `SELECT * FROM \`${config.database}\`.\`${tableName}\``
+      : `SELECT * FROM "${config.database}"."${tableName}"`;
+    
+    const data = await databaseManager.executeQuery(connectionId, dataQuery);
+    
+    xmlData += `  <table name="${tableName}">\n`;
+    
+    if (data.length > 0) {
+      const columns = Object.keys(data[0]);
+      
+      for (const row of data) {
+        xmlData += `    <row>\n`;
+        for (const column of columns) {
+          const value = row[column];
+          const escapedValue = value === null ? '' : String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+          xmlData += `      <${column}>${escapedValue}</${column}>\n`;
+        }
+        xmlData += `    </row>\n`;
+      }
+    }
+    
+    xmlData += `  </table>\n`;
+  }
+
+  xmlData += '</database>';
+  return xmlData;
+}
+
+/**
+ * Export to TSV format
+ */
+async function exportToTsv(connectionId: string, config: any, tables?: string[]): Promise<string> {
+  let tsvData = '';
+  
+  if (!tables) {
+    const tablesQuery = config.type === 'mysql'
+      ? `SELECT table_name FROM information_schema.tables WHERE table_schema = ? ORDER BY table_name`
+      : `SELECT table_name FROM information_schema.tables WHERE table_catalog = $1 ORDER BY table_name`;
+    
+    const tableRows = await databaseManager.executeQuery(connectionId, tablesQuery, [config.database]);
+    tables = tableRows.map((row: any) => row.table_name);
+  }
+
+  const tableList = tables || [];
+
+  for (const tableName of tableList) {
+    const dataQuery = config.type === 'mysql'
+      ? `SELECT * FROM \`${config.database}\`.\`${tableName}\``
+      : `SELECT * FROM "${config.database}"."${tableName}"`;
+    
+    const data = await databaseManager.executeQuery(connectionId, dataQuery);
+    
+    if (data.length > 0) {
+      // Add table header
+      tsvData += `-- Table: ${tableName}\n`;
+      
+      // Get column names
+      const columns = Object.keys(data[0]);
+      tsvData += columns.join('\t') + '\n';
+      
+      // Add data rows
+      for (const row of data) {
+        const values = columns.map((col: string) => {
+          const value = row[col];
+          if (value === null) return '';
+          if (typeof value === 'string' && (value.includes('\t') || value.includes('\n') || value.includes('\r'))) {
+            return `"${value.replace(/"/g, '""')}"`;
+          }
+          return value;
+        });
+        tsvData += values.join('\t') + '\n';
+      }
+      tsvData += '\n';
+    }
+  }
+
+  return tsvData;
 }
 
 export default router;

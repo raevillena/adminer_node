@@ -5,11 +5,65 @@ import { databaseManager } from '../services/databaseManager';
 import { generateToken } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { DatabaseConnection, ApiResponse, ConnectionTest } from '../../shared/types';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const router = Router();
 
-// In-memory storage for connections (in production, use a database)
-const connections: Map<string, DatabaseConnection> = new Map();
+// File-based storage for connections
+const CONNECTIONS_FILE = path.join(__dirname, '../../data/connections.json');
+
+// Ensure data directory exists
+const dataDir = path.dirname(CONNECTIONS_FILE);
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+// Load connections from file
+const loadConnections = (): Map<string, DatabaseConnection> => {
+  try {
+    if (fs.existsSync(CONNECTIONS_FILE)) {
+      const data = fs.readFileSync(CONNECTIONS_FILE, 'utf8');
+      const connectionsArray = JSON.parse(data);
+      return new Map(connectionsArray.map((conn: any) => [conn.id, {
+        ...conn,
+        createdAt: new Date(conn.createdAt),
+        updatedAt: new Date(conn.updatedAt),
+      }]));
+    }
+  } catch (error) {
+    console.error('Error loading connections:', error);
+  }
+  return new Map();
+};
+
+// Save connections to file
+const saveConnections = (connections: Map<string, DatabaseConnection>): void => {
+  try {
+    const connectionsArray = Array.from(connections.values());
+    fs.writeFileSync(CONNECTIONS_FILE, JSON.stringify(connectionsArray, null, 2));
+  } catch (error) {
+    console.error('Error saving connections:', error);
+  }
+};
+
+// Load connections on startup
+const connections: Map<string, DatabaseConnection> = loadConnections();
+
+// Initialize database connections for loaded connections
+const initializeDatabaseConnections = async () => {
+  for (const [id, connection] of connections) {
+    try {
+      await databaseManager.createConnection(connection);
+      console.log(`✅ Database connection initialized for: ${connection.name}`);
+    } catch (error) {
+      console.error(`❌ Failed to initialize database connection for ${connection.name}:`, error);
+    }
+  }
+};
+
+// Initialize database connections on startup
+initializeDatabaseConnections();
 
 /**
  * Test a database connection
@@ -116,6 +170,7 @@ router.post('/', [
 
     // Store connection
     connections.set(connectionId, connection);
+    saveConnections(connections);
 
     // Create database connection
     await databaseManager.createConnection(connection);
@@ -157,7 +212,15 @@ router.get('/', (req: Request, res: Response) => {
  * Get a specific connection
  */
 router.get('/:id', (req: Request, res: Response) => {
-  const connection = connections.get(req.params.id);
+  const connectionId = req.params.id;
+  if (!connectionId) {
+    return res.status(400).json({
+      success: false,
+      message: 'Connection ID is required',
+    });
+  }
+  
+  const connection = connections.get(connectionId);
   
   if (!connection) {
     return res.status(404).json({
@@ -188,6 +251,14 @@ router.put('/:id', [
   body('database').optional().notEmpty().withMessage('Database cannot be empty'),
 ], async (req: Request, res: Response) => {
   try {
+    const connectionId = req.params.id;
+    if (!connectionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Connection ID is required',
+      });
+    }
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
@@ -197,7 +268,7 @@ router.put('/:id', [
       });
     }
 
-    const connection = connections.get(req.params.id);
+    const connection = connections.get(connectionId);
     if (!connection) {
       return res.status(404).json({
         success: false,
@@ -236,7 +307,8 @@ router.put('/:id', [
       await databaseManager.createConnection(updatedConnection);
     }
 
-    connections.set(req.params.id, updatedConnection);
+    connections.set(connectionId, updatedConnection);
+    saveConnections(connections);
 
     res.json({
       success: true,
@@ -258,7 +330,15 @@ router.put('/:id', [
  */
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    const connection = connections.get(req.params.id);
+    const connectionId = req.params.id;
+    if (!connectionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Connection ID is required',
+      });
+    }
+
+    const connection = connections.get(connectionId);
     if (!connection) {
       return res.status(404).json({
         success: false,
@@ -267,10 +347,11 @@ router.delete('/:id', async (req: Request, res: Response) => {
     }
 
     // Close database connection
-    await databaseManager.closeConnection(req.params.id);
+    await databaseManager.closeConnection(connectionId);
     
     // Remove from storage
-    connections.delete(req.params.id);
+    connections.delete(connectionId);
+    saveConnections(connections);
 
     res.json({
       success: true,
@@ -289,7 +370,15 @@ router.delete('/:id', async (req: Request, res: Response) => {
  */
 router.get('/:id/status', async (req: Request, res: Response) => {
   try {
-    const connection = connections.get(req.params.id);
+    const connectionId = req.params.id;
+    if (!connectionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Connection ID is required',
+      });
+    }
+
+    const connection = connections.get(connectionId);
     if (!connection) {
       return res.status(404).json({
         success: false,
@@ -297,7 +386,7 @@ router.get('/:id/status', async (req: Request, res: Response) => {
       });
     }
 
-    const isConnected = await databaseManager.getConnectionStatus(req.params.id);
+    const isConnected = await databaseManager.getConnectionStatus(connectionId);
 
     res.json({
       success: true,
@@ -307,6 +396,63 @@ router.get('/:id/status', async (req: Request, res: Response) => {
       },
     });
   } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * Generate a token for an existing connection
+ */
+router.post('/:id/token', async (req: Request, res: Response) => {
+  try {
+    const connectionId = req.params.id;
+    if (!connectionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Connection ID is required',
+      });
+    }
+
+    console.log(`🔑 Generating token for connection ID: ${connectionId}`);
+    
+    const connection = connections.get(connectionId);
+    if (!connection) {
+      console.error(`❌ Connection not found in connections map: ${connectionId}`);
+      return res.status(404).json({
+        success: false,
+        message: 'Connection not found',
+      });
+    }
+
+    console.log(`✅ Connection found: ${connection.name} (${connection.type})`);
+
+    // Ensure database connection exists in database manager
+    const existingConnection = databaseManager.getConnection(connectionId);
+    if (!existingConnection) {
+      console.log(`🔌 Creating database connection for: ${connection.name}`);
+      // Create the database connection if it doesn't exist
+      await databaseManager.createConnection(connection);
+      console.log(`✅ Database connection created for: ${connection.name}`);
+    } else {
+      console.log(`✅ Database connection already exists for: ${connection.name}`);
+    }
+
+    // Generate JWT token
+    const token = generateToken(connectionId);
+    console.log(`🎫 JWT token generated for: ${connection.name}`);
+
+    res.json({
+      success: true,
+      data: {
+        token,
+      },
+    });
+  } catch (error: any) {
+    const connectionId = req.params.id;
+    console.error(`❌ Error generating token for connection ${connectionId}:`, error);
     res.status(500).json({
       success: false,
       message: error.message,

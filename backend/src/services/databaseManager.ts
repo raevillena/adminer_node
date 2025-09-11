@@ -13,14 +13,19 @@ class DatabaseManager {
   async testConnection(config: Omit<DatabaseConnection, 'id' | 'createdAt' | 'updatedAt'>): Promise<ConnectionTest> {
     try {
       if (config.type === 'mysql' || config.type === 'mariadb') {
-        const connection = await mysql.createConnection({
+        const connectionConfig: any = {
           host: config.host,
           port: config.port,
           user: config.username,
           password: config.password,
           database: config.database,
-          ssl: config.ssl ? { rejectUnauthorized: false } : false,
-        });
+        };
+        
+        if (config.ssl) {
+          connectionConfig.ssl = { rejectUnauthorized: false };
+        }
+        
+        const connection = await mysql.createConnection(connectionConfig);
 
         // Get server version
         const [versionRows] = await connection.execute('SELECT VERSION() as version');
@@ -82,17 +87,22 @@ class DatabaseManager {
   async createConnection(config: DatabaseConnection): Promise<void> {
     try {
       if (config.type === 'mysql' || config.type === 'mariadb') {
-        const pool = mysql.createPool({
+        const poolConfig: any = {
           host: config.host,
           port: config.port,
           user: config.username,
           password: config.password,
-          database: config.database,
-          ssl: config.ssl ? { rejectUnauthorized: false } : false,
+          database: config.database || undefined, // Allow undefined database for root connections
           waitForConnections: true,
           connectionLimit: 10,
           queueLimit: 0,
-        });
+        };
+        
+        if (config.ssl) {
+          poolConfig.ssl = { rejectUnauthorized: false };
+        }
+        
+        const pool = mysql.createPool(poolConfig);
 
         this.connections.set(config.id, pool);
         this.connectionConfigs.set(config.id, config);
@@ -102,7 +112,7 @@ class DatabaseManager {
           port: config.port,
           user: config.username,
           password: config.password,
-          database: config.database,
+          database: config.database || 'postgres', // Default to 'postgres' database for root connections
           ssl: config.ssl ? { rejectUnauthorized: false } : false,
           max: 10,
           idleTimeoutMillis: 30000,
@@ -157,6 +167,10 @@ class DatabaseManager {
 
       throw new Error('Unsupported database type');
     } catch (error: any) {
+      console.error(`❌ Database query error:`, error);
+      console.error(`❌ Error code:`, error.code);
+      console.error(`❌ Error message:`, error.message);
+      console.error(`❌ SQL state:`, error.sqlState);
       throw new Error(this.formatDatabaseError(error));
     }
   }
@@ -181,6 +195,28 @@ class DatabaseManager {
     }
 
     throw new Error('Unsupported database type');
+  }
+
+  /**
+   * Switch database for a connection (MySQL/MariaDB only)
+   */
+  async switchDatabase(connectionId: string, databaseName: string): Promise<void> {
+    const config = this.getConnectionConfig(connectionId);
+    if (!config) {
+      throw new Error('Connection not found');
+    }
+
+    if (config.type === 'mysql' || config.type === 'mariadb') {
+      // For MySQL/MariaDB, we can use USE database command
+      await this.executeQuery(connectionId, `USE \`${databaseName}\``);
+      // Update the config to reflect the new database
+      config.database = databaseName;
+      this.connectionConfigs.set(connectionId, config);
+    } else if (config.type === 'postgresql') {
+      // For PostgreSQL, we need to create a new connection with the new database
+      const newConfig = { ...config, database: databaseName };
+      await this.createConnection(newConfig);
+    }
   }
 
   /**

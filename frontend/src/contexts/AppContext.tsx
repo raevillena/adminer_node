@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, ReactNode, useCallback } from 'react';
 import { DatabaseConnection, AppState, QueryTab } from '../../shared/types';
 
 // Action types
@@ -139,30 +139,30 @@ export function AppProvider({ children }: AppProviderProps) {
   const [state, dispatch] = useReducer(appReducer, initialState);
 
   // Helper functions
-  const setCurrentConnection = (connection: DatabaseConnection | null) => {
+  const setCurrentConnection = useCallback((connection: DatabaseConnection | null) => {
     dispatch({ type: 'SET_CURRENT_CONNECTION', payload: connection });
-  };
+  }, [dispatch]);
 
-  const setCurrentDatabase = (database: string | null) => {
+  const setCurrentDatabase = useCallback((database: string | null) => {
     dispatch({ type: 'SET_CURRENT_DATABASE', payload: database });
-  };
+  }, []);
 
-  const setCurrentTable = (table: string | null) => {
+  const setCurrentTable = useCallback((table: string | null) => {
     dispatch({ type: 'SET_CURRENT_TABLE', payload: table });
-  };
+  }, [dispatch]);
 
-  const toggleSidebar = () => {
+  const toggleSidebar = useCallback(() => {
     dispatch({ type: 'TOGGLE_SIDEBAR' });
-  };
+  }, [dispatch]);
 
-  const setSidebarOpen = (open: boolean) => {
+  const setSidebarOpen = useCallback((open: boolean) => {
     dispatch({ type: 'SET_SIDEBAR_OPEN', payload: open });
-  };
+  }, [dispatch]);
 
-  const setTheme = (theme: 'light' | 'dark') => {
+  const setTheme = useCallback((theme: 'light' | 'dark') => {
     dispatch({ type: 'SET_THEME', payload: theme });
     localStorage.setItem('theme', theme);
-  };
+  }, [dispatch]);
 
   const addQueryTab = (tab: QueryTab) => {
     dispatch({ type: 'ADD_QUERY_TAB', payload: tab });

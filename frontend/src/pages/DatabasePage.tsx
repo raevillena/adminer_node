@@ -24,6 +24,8 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Breadcrumbs,
+  Link,
 } from '@mui/material';
 import {
   Storage as DatabaseIcon,
@@ -33,6 +35,8 @@ import {
   Schema as SchemaIcon,
   DataObject as DataIcon,
   AccountTree as ErdIcon,
+  ArrowBack as ArrowBackIcon,
+  Home as HomeIcon,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -71,12 +75,28 @@ export default function DatabasePage() {
   const { state, setCurrentDatabase } = useApp();
   const [activeTab, setActiveTab] = useState(0);
 
-  // Set current database in context
-  useEffect(() => {
-    if (databaseName) {
-      setCurrentDatabase(databaseName);
+  // Switch to the database when the page loads
+  const switchDatabaseMutation = useMutation(
+    (dbName: string) => apiService.databases.switch(dbName),
+    {
+      onSuccess: () => {
+        console.log(`✅ Successfully switched to database: ${databaseName}`);
+      },
+      onError: (error: any) => {
+        console.error(`❌ Failed to switch to database ${databaseName}:`, error);
+        toast.error(error.response?.data?.message || 'Failed to switch to database');
+      },
     }
-  }, [databaseName, setCurrentDatabase]);
+  );
+
+  // Set current database in context and switch to it
+  useEffect(() => {
+    if (databaseName && state.currentConnection) {
+      setCurrentDatabase(databaseName);
+      // Switch to the database
+      switchDatabaseMutation.mutate(databaseName);
+    }
+  }, [databaseName, setCurrentDatabase, state.currentConnection]);
 
   // Fetch database information
   const { data: database, isLoading: databaseLoading } = useQuery(
@@ -142,8 +162,36 @@ export default function DatabasePage() {
 
   return (
     <Box>
+      {/* Breadcrumb Navigation */}
+      <Box sx={{ mb: 2 }}>
+        <Breadcrumbs aria-label="breadcrumb">
+          <Link
+            component="button"
+            variant="body2"
+            onClick={() => navigate('/')}
+            sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
+          >
+            <HomeIcon fontSize="small" />
+            Dashboard
+          </Link>
+          <Typography variant="body2" color="text.primary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <DatabaseIcon fontSize="small" />
+            {databaseName}
+          </Typography>
+        </Breadcrumbs>
+      </Box>
+
       {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+        <Button
+          startIcon={<ArrowBackIcon />}
+          variant="outlined"
+          size="small"
+          onClick={() => navigate('/')}
+          sx={{ mr: 2 }}
+        >
+          Back to Dashboard
+        </Button>
         <Typography variant="h4" component="h1" sx={{ flexGrow: 1 }}>
           Database: {databaseName}
         </Typography>

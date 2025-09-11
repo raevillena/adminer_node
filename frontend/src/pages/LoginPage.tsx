@@ -27,7 +27,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { apiService } from '../services/api';
-import { DatabaseConnection } from '../../shared/types';
+// DatabaseConnection type is not needed in this component
 
 interface LoginFormData {
   name: string;
@@ -40,10 +40,36 @@ interface LoginFormData {
   ssl: boolean;
 }
 
+// Cache key for storing form data
+const CACHE_KEY = 'adminer_login_cache';
+
+// Helper functions for caching
+const getCachedFormData = (): Partial<LoginFormData> => {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY);
+    return cached ? JSON.parse(cached) : {};
+  } catch {
+    return {};
+  }
+};
+
+const setCachedFormData = (data: Partial<LoginFormData>) => {
+  try {
+    // Don't cache password for security
+    const { password, ...dataToCache } = data;
+    localStorage.setItem(CACHE_KEY, JSON.stringify(dataToCache));
+  } catch {
+    // Ignore storage errors
+  }
+};
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message?: string } | null>(null);
+
+  // Get cached data
+  const cachedData = getCachedFormData();
 
   const {
     control,
@@ -53,23 +79,33 @@ export default function LoginPage() {
     setValue,
   } = useForm<LoginFormData>({
     defaultValues: {
-      name: '',
-      type: 'mysql',
-      host: 'localhost',
-      port: 3306,
-      username: '',
-      password: '',
-      database: '',
-      ssl: false,
+      name: cachedData.name || '',
+      type: cachedData.type || 'mysql',
+      host: cachedData.host || 'localhost',
+      port: cachedData.port || 3306,
+      username: cachedData.username || '',
+      password: '', // Never cache password
+      database: cachedData.database || '',
+      ssl: cachedData.ssl || false,
     },
   });
 
   const watchedType = watch('type');
+  const watchedValues = watch();
 
   // Update port when database type changes
   React.useEffect(() => {
     setValue('port', (watchedType === 'mysql' || watchedType === 'mariadb') ? 3306 : 5432);
   }, [watchedType, setValue]);
+
+  // Cache form data when values change (debounced)
+  React.useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setCachedFormData(watchedValues);
+    }, 500); // Debounce for 500ms
+
+    return () => clearTimeout(timeoutId);
+  }, [watchedValues]);
 
   const handleTestConnection = async (data: LoginFormData) => {
     setIsLoading(true);
@@ -99,12 +135,39 @@ export default function LoginPage() {
       
       // Store token and navigate to dashboard
       localStorage.setItem('token', result.token);
+      
+      // Cache the successful connection data (except password)
+      setCachedFormData(data);
+      
+      // Dispatch auth change event
+      window.dispatchEvent(new Event('authChange'));
+      
       toast.success('Connected successfully!');
+      
+      // Navigate to dashboard
       navigate('/dashboard');
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Connection failed');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleClearCache = () => {
+    try {
+      localStorage.removeItem(CACHE_KEY);
+      // Reset form to default values
+      setValue('name', '');
+      setValue('type', 'mysql');
+      setValue('host', 'localhost');
+      setValue('port', 3306);
+      setValue('username', '');
+      setValue('password', '');
+      setValue('database', '');
+      setValue('ssl', false);
+      toast.success('Cache cleared successfully!');
+    } catch (error) {
+      toast.error('Failed to clear cache');
     }
   };
 
@@ -187,6 +250,14 @@ export default function LoginPage() {
               <Typography variant="h4" component="h2" gutterBottom sx={{ textAlign: 'center', mb: 3 }}>
                 Connect to Database
               </Typography>
+              
+              {Object.keys(cachedData).length > 0 && (
+                <Box sx={{ mb: 2, p: 1, backgroundColor: 'info.light', borderRadius: 1, textAlign: 'center' }}>
+                  <Typography variant="body2" color="info.dark">
+                    📝 Using cached connection details (password not cached for security)
+                  </Typography>
+                </Box>
+              )}
 
               <form onSubmit={handleSubmit(onSubmit)}>
                 <Grid container spacing={3}>
@@ -298,14 +369,15 @@ export default function LoginPage() {
                     <Controller
                       name="database"
                       control={control}
-                      rules={{ required: 'Database is required' }}
+                      rules={{ required: false }}
                       render={({ field }) => (
                         <TextField
                           {...field}
                           fullWidth
-                          label="Database"
+                          label="Database (optional for root/admin access)"
+                          placeholder="Leave empty to connect to all databases"
                           error={!!errors.database}
-                          helperText={errors.database?.message}
+                          helperText={errors.database?.message || "Leave empty to access all databases as root/admin"}
                         />
                       )}
                     />
@@ -333,7 +405,7 @@ export default function LoginPage() {
                   )}
 
                   <Grid item xs={12}>
-                    <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                    <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
                       <Button
                         type="button"
                         variant="outlined"
@@ -350,6 +422,15 @@ export default function LoginPage() {
                         sx={{ minWidth: 120 }}
                       >
                         {isLoading ? <CircularProgress size={20} /> : 'Connect'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="text"
+                        onClick={handleClearCache}
+                        disabled={isLoading}
+                        sx={{ minWidth: 100, color: 'text.secondary' }}
+                      >
+                        Clear Cache
                       </Button>
                     </Box>
                   </Grid>

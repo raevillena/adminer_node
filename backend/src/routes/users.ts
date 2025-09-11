@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { databaseManager } from '../services/databaseManager';
 import { createError } from '../middleware/errorHandler';
-import { DatabaseUser, UserPrivilege, ApiResponse } from '../../shared/types';
+import { DatabaseUser, UserPrivilege, ApiResponse } from '../../../shared/types';
 
 const router = Router();
 
@@ -33,8 +33,7 @@ router.get('/', async (req: Request, res: Response) => {
           max_user_connections as maxUserConnections,
           max_questions as maxQuestions,
           max_updates as maxUpdates,
-          password_expired as passwordExpired,
-          account_locked as accountLocked
+          password_expired as passwordExpired
         FROM mysql.user
         ORDER BY User, Host
       `;
@@ -56,13 +55,13 @@ router.get('/', async (req: Request, res: Response) => {
         users.push({
           name: user.name,
           host: user.host,
-          privileges,
+          privileges: privileges.filter((p: string) => p && p.trim()),
           maxConnections: user.maxConnections,
           maxUserConnections: user.maxUserConnections,
           maxQuestions: user.maxQuestions,
           maxUpdates: user.maxUpdates,
           passwordExpired: user.passwordExpired === 'Y',
-          accountLocked: user.accountLocked === 'Y',
+          accountLocked: false, // MariaDB doesn't have account_locked column
         });
       }
     } else if (config.type === 'postgresql') {
@@ -132,8 +131,8 @@ router.post('/', [
     }
 
     if (config.type === 'mysql' || config.type === 'mariadb') {
-      const createUserQuery = `CREATE USER ?@? IDENTIFIED BY ?`;
-      await databaseManager.executeQuery(connectionId, createUserQuery, [name, host, password]);
+      const createUserQuery = `CREATE USER \`${name}\`@\`${host}\` IDENTIFIED BY '${password}'`;
+      await databaseManager.executeQuery(connectionId, createUserQuery);
     } else if (config.type === 'postgresql') {
       const createUserQuery = `CREATE USER "${name}" WITH PASSWORD $1`;
       await databaseManager.executeQuery(connectionId, createUserQuery, [password]);
@@ -185,18 +184,44 @@ router.post('/:username/privileges', [
     }
 
     let grantQuery: string;
-    const privilegeList = privileges.join(', ');
+    
+    // Filter out redundant privileges when ALL is selected
+    let filteredPrivileges = privileges;
+    if (privileges.includes('ALL')) {
+      filteredPrivileges = ['ALL'];
+    }
+    
+    // Filter out global-only privileges when granting at database/table level
+    const globalOnlyPrivileges = ['SHUTDOWN', 'RELOAD', 'PROCESS', 'FILE', 'REPLICATION CLIENT', 'REPLICATION SLAVE', 'CREATE USER'];
+    if (database || table) {
+      filteredPrivileges = filteredPrivileges.filter(priv => !globalOnlyPrivileges.includes(priv));
+    }
+    
+    if (filteredPrivileges.length === 0) {
+      throw createError('No valid privileges to grant at this scope', 400);
+    }
+    
+    const privilegeList = filteredPrivileges.join(', ');
 
     if (config.type === 'mysql' || config.type === 'mariadb') {
+      // Get user's host from the database
+      const userQuery = `SELECT Host FROM mysql.user WHERE User = ? LIMIT 1`;
+      const userResult = await databaseManager.executeQuery(connectionId, userQuery, [username]);
+      const userHost = userResult[0]?.Host || 'localhost';
+      
       if (database && table) {
-        grantQuery = `GRANT ${privilegeList} ON \`${database}\`.\`${table}\` TO ?@?`;
+        grantQuery = `GRANT ${privilegeList} ON \`${database}\`.\`${table}\` TO \`${username}\`@\`${userHost}\``;
       } else if (database) {
-        grantQuery = `GRANT ${privilegeList} ON \`${database}\`.* TO ?@?`;
+        grantQuery = `GRANT ${privilegeList} ON \`${database}\`.* TO \`${username}\`@\`${userHost}\``;
       } else {
-        grantQuery = `GRANT ${privilegeList} ON *.* TO ?@?`;
+        grantQuery = `GRANT ${privilegeList} ON *.* TO \`${username}\`@\`${userHost}\``;
       }
       
-      await databaseManager.executeQuery(connectionId, grantQuery, [username, 'localhost']);
+      console.log(`🔐 Granting privileges: ${grantQuery}`);
+      await databaseManager.executeQuery(connectionId, grantQuery);
+      
+      // Flush privileges to ensure they take effect immediately
+      await databaseManager.executeQuery(connectionId, 'FLUSH PRIVILEGES');
     } else if (config.type === 'postgresql') {
       if (database && table) {
         grantQuery = `GRANT ${privilegeList} ON "${database}"."${table}" TO "${username}"`;
@@ -241,8 +266,13 @@ router.delete('/:username', async (req: Request, res: Response) => {
     }
 
     if (config.type === 'mysql' || config.type === 'mariadb') {
+      // Get user's host from the database
+      const userQuery = `SELECT Host FROM mysql.user WHERE User = ? LIMIT 1`;
+      const userResult = await databaseManager.executeQuery(connectionId, userQuery, [username]);
+      const userHost = userResult[0]?.Host || 'localhost';
+      
       const dropUserQuery = `DROP USER ?@?`;
-      await databaseManager.executeQuery(connectionId, dropUserQuery, [username, 'localhost']);
+      await databaseManager.executeQuery(connectionId, dropUserQuery, [username, userHost]);
     } else if (config.type === 'postgresql') {
       const dropUserQuery = `DROP USER "${username}"`;
       await databaseManager.executeQuery(connectionId, dropUserQuery);

@@ -37,9 +37,12 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction):
 };
 
 export const generateToken = (connectionId: string): string => {
+  const secret = process.env.JWT_SECRET || 'fallback-secret';
+  const expiresIn = process.env.JWT_EXPIRES_IN || '24h';
+  
   return jwt.sign(
     { connectionId },
-    process.env.JWT_SECRET || 'fallback-secret',
-    { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+    secret,
+    { expiresIn: expiresIn as any }
   );
 };

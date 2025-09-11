@@ -294,4 +294,57 @@ router.get('/suggestions', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Explain a SQL query (query execution plan)
+ */
+router.post('/explain', [
+  body('query').notEmpty().withMessage('Query is required'),
+  body('params').optional().isArray().withMessage('Params must be an array'),
+], async (req: Request, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array(),
+      });
+    }
+
+    const connectionId = req.user?.connectionId;
+    const { query, params = [] } = req.body;
+
+    if (!connectionId) {
+      throw createError('No active connection', 400);
+    }
+
+    const config = databaseManager.getConnectionConfig(connectionId);
+    if (!config) {
+      throw createError('Connection not found', 404);
+    }
+
+    // Add EXPLAIN to the query
+    const explainQuery = `EXPLAIN ${query}`;
+    
+    const startTime = Date.now();
+    const rows = await databaseManager.executeQuery(connectionId, explainQuery, params);
+    const executionTime = Date.now() - startTime;
+
+    res.json({
+      success: true,
+      data: {
+        columns: rows.length > 0 ? Object.keys(rows[0]) : [],
+        rows,
+        executionTime,
+        message: 'Query execution plan generated successfully',
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 export default router;

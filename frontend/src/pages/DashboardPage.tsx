@@ -24,6 +24,8 @@ import {
   Alert,
   CircularProgress,
   Divider,
+  Breadcrumbs,
+  Link,
 } from '@mui/material';
 import {
   Storage as DatabaseIcon,
@@ -36,6 +38,7 @@ import {
   Refresh as RefreshIcon,
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
+  Home as HomeIcon,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useNavigate } from 'react-router-dom';
@@ -48,8 +51,11 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { state, setCurrentConnection, setCurrentDatabase } = useApp();
-  const [showNewConnectionDialog, setShowNewConnectionDialog] = useState(false);
   const [editingConnection, setEditingConnection] = useState<DatabaseConnection | null>(null);
+  const [showNewDatabaseDialog, setShowNewDatabaseDialog] = useState(false);
+  const [newDatabaseName, setNewDatabaseName] = useState('');
+  const [newDatabaseCharset, setNewDatabaseCharset] = useState('');
+  const [newDatabaseCollation, setNewDatabaseCollation] = useState('');
 
   // Fetch connections
   const { data: connections = [], isLoading: connectionsLoading } = useQuery(
@@ -88,25 +94,42 @@ export default function DashboardPage() {
 
   // Connect to database mutation
   const connectMutation = useMutation(
-    (connectionId: string) => {
+    async (connectionId: string) => {
+      console.log('🔌 Attempting to connect to:', connectionId);
       const connection = connections.find(c => c.id === connectionId);
-      if (!connection) throw new Error('Connection not found');
+      if (!connection) {
+        console.error('❌ Connection not found in connections list');
+        throw new Error('Connection not found');
+      }
+      
+      console.log('📡 Getting token for connection:', connection.name);
+      // Get a proper JWT token from the backend
+      const result = await apiService.connections.getToken(connectionId);
+      console.log('✅ Token received:', result.token ? 'Yes' : 'No');
       
       // Store connection in context
       setCurrentConnection(connection);
+      console.log('💾 Connection stored in context');
       
-      // Store token (in real app, this would come from login)
-      localStorage.setItem('token', 'dummy-token');
+      // Use the JWT token from the backend
+      localStorage.setItem('token', result.token);
+      console.log('🔑 Token stored in localStorage');
       
-      return Promise.resolve();
+      // Dispatch auth change event
+      window.dispatchEvent(new Event('authChange'));
+      console.log('📢 Auth change event dispatched');
+      
+      return result;
     },
     {
       onSuccess: () => {
+        console.log('🎉 Connection successful!');
         toast.success('Connected successfully!');
         queryClient.invalidateQueries(['databases']);
         queryClient.invalidateQueries(['serverInfo']);
       },
       onError: (error: any) => {
+        console.error('❌ Connection failed:', error);
         toast.error(error.message || 'Failed to connect');
       },
     }
@@ -126,14 +149,77 @@ export default function DashboardPage() {
     }
   );
 
+  // Create connection mutation
+  const createConnectionMutation = useMutation(
+    (config: Omit<DatabaseConnection, 'id' | 'createdAt' | 'updatedAt'>) => 
+      apiService.connections.create(config),
+    {
+      onSuccess: (result) => {
+        toast.success('Connection created successfully');
+        queryClient.invalidateQueries('connections');
+        setEditingConnection(null);
+        // Auto-connect to the new connection
+        setCurrentConnection(result.connection);
+        localStorage.setItem('token', result.token);
+        window.dispatchEvent(new Event('authChange'));
+      },
+      onError: (error: any) => {
+        toast.error(error.response?.data?.message || 'Failed to create connection');
+      },
+    }
+  );
+
+  // Update connection mutation
+  const updateConnectionMutation = useMutation(
+    ({ id, updates }: { id: string; updates: Partial<DatabaseConnection> }) => 
+      apiService.connections.update(id, updates),
+    {
+      onSuccess: () => {
+        toast.success('Connection updated successfully');
+        queryClient.invalidateQueries('connections');
+        setEditingConnection(null);
+      },
+      onError: (error: any) => {
+        toast.error(error.response?.data?.message || 'Failed to update connection');
+      },
+    }
+  );
+
+  // Create database mutation
+  const createDatabaseMutation = useMutation(
+    ({ name, options }: { name: string; options?: { charset?: string; collation?: string } }) =>
+      apiService.databases.create(name, options),
+    {
+      onSuccess: () => {
+        toast.success('Database created successfully');
+        queryClient.invalidateQueries(['databases']);
+        handleCloseNewDatabaseDialog();
+      },
+      onError: (error: any) => {
+        toast.error(error.response?.data?.message || 'Failed to create database');
+      },
+    }
+  );
+
   const handleConnect = (connection: DatabaseConnection) => {
     connectMutation.mutate(connection.id);
+  };
+
+  const handleCloseNewDatabaseDialog = () => {
+    setShowNewDatabaseDialog(false);
+    setNewDatabaseName('');
+    setNewDatabaseCharset('');
+    setNewDatabaseCollation('');
   };
 
   const handleDisconnect = () => {
     setCurrentConnection(null);
     setCurrentDatabase(null);
     localStorage.removeItem('token');
+    
+    // Dispatch auth change event
+    window.dispatchEvent(new Event('authChange'));
+    
     toast.success('Disconnected');
   };
 
@@ -177,6 +263,16 @@ export default function DashboardPage() {
 
   return (
     <Box>
+      {/* Breadcrumb Navigation */}
+      <Box sx={{ mb: 2 }}>
+        <Breadcrumbs aria-label="breadcrumb">
+          <Typography variant="body2" color="text.primary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <HomeIcon fontSize="small" />
+            Dashboard
+          </Typography>
+        </Breadcrumbs>
+      </Box>
+
       {/* Header */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" component="h1" gutterBottom>
@@ -230,7 +326,19 @@ export default function DashboardPage() {
                 <Button
                   startIcon={<AddIcon />}
                   variant="contained"
-                  onClick={() => setShowNewConnectionDialog(true)}
+                  onClick={() => setEditingConnection({
+                    id: '',
+                    name: '',
+                    type: 'mysql',
+                    host: '',
+                    port: 3306,
+                    username: '',
+                    password: '',
+                    database: '',
+                    ssl: false,
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                  })}
                 >
                   New Connection
                 </Button>
@@ -308,9 +416,19 @@ export default function DashboardPage() {
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6">Databases</Typography>
                 {state.currentConnection && (
-                  <IconButton onClick={() => queryClient.invalidateQueries(['databases'])}>
-                    <RefreshIcon />
-                  </IconButton>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Button
+                      startIcon={<AddIcon />}
+                      variant="contained"
+                      size="small"
+                      onClick={() => setShowNewDatabaseDialog(true)}
+                    >
+                      Add Database
+                    </Button>
+                    <IconButton onClick={() => queryClient.invalidateQueries(['databases'])}>
+                      <RefreshIcon />
+                    </IconButton>
+                  </Box>
                 )}
               </Box>
 
@@ -414,6 +532,178 @@ export default function DashboardPage() {
           </Grid>
         )}
       </Grid>
+
+      {/* Connection Edit Dialog */}
+      <Dialog
+        open={!!editingConnection}
+        onClose={() => setEditingConnection(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          {editingConnection ? 'Edit Connection' : 'New Connection'}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1 }}>
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Connection Name"
+                  value={editingConnection?.name || ''}
+                  onChange={(e) => setEditingConnection(prev => prev ? { ...prev, name: e.target.value } : null)}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Database Type</InputLabel>
+                  <Select
+                    value={editingConnection?.type || 'mysql'}
+                    onChange={(e) => setEditingConnection(prev => prev ? { ...prev, type: e.target.value as any } : null)}
+                    label="Database Type"
+                  >
+                    <MenuItem value="mysql">MySQL</MenuItem>
+                    <MenuItem value="mariadb">MariaDB</MenuItem>
+                    <MenuItem value="postgresql">PostgreSQL</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Port"
+                  type="number"
+                  value={editingConnection?.port || 3306}
+                  onChange={(e) => setEditingConnection(prev => prev ? { ...prev, port: parseInt(e.target.value) } : null)}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Host"
+                  value={editingConnection?.host || ''}
+                  onChange={(e) => setEditingConnection(prev => prev ? { ...prev, host: e.target.value } : null)}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Username"
+                  value={editingConnection?.username || ''}
+                  onChange={(e) => setEditingConnection(prev => prev ? { ...prev, username: e.target.value } : null)}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Password"
+                  type="password"
+                  value={editingConnection?.password || ''}
+                  onChange={(e) => setEditingConnection(prev => prev ? { ...prev, password: e.target.value } : null)}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Database"
+                  value={editingConnection?.database || ''}
+                  onChange={(e) => setEditingConnection(prev => prev ? { ...prev, database: e.target.value } : null)}
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditingConnection(null)}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              if (editingConnection) {
+                if (editingConnection.id) {
+                  // Update existing connection
+                  updateConnectionMutation.mutate({
+                    id: editingConnection.id,
+                    updates: editingConnection
+                  });
+                } else {
+                  // Create new connection
+                  createConnectionMutation.mutate(editingConnection);
+                }
+              }
+            }}
+            disabled={createConnectionMutation.isLoading || updateConnectionMutation.isLoading}
+          >
+            {editingConnection?.id ? 'Update' : 'Create'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* New Database Dialog */}
+      <Dialog open={showNewDatabaseDialog} onClose={handleCloseNewDatabaseDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>Create New Database</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Database Name"
+                  value={newDatabaseName}
+                  onChange={(e) => setNewDatabaseName(e.target.value)}
+                  placeholder="Enter database name"
+                  required
+                />
+              </Grid>
+              {state.currentConnection?.type === 'mysql' || state.currentConnection?.type === 'mariadb' ? (
+                <>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Character Set"
+                      value={newDatabaseCharset}
+                      onChange={(e) => setNewDatabaseCharset(e.target.value)}
+                      placeholder="e.g., utf8mb4"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Collation"
+                      value={newDatabaseCollation}
+                      onChange={(e) => setNewDatabaseCollation(e.target.value)}
+                      placeholder="e.g., utf8mb4_unicode_ci"
+                    />
+                  </Grid>
+                </>
+              ) : null}
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseNewDatabaseDialog}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              if (newDatabaseName.trim()) {
+                createDatabaseMutation.mutate({
+                  name: newDatabaseName.trim(),
+                  options: {
+                    charset: newDatabaseCharset || undefined,
+                    collation: newDatabaseCollation || undefined,
+                  }
+                });
+              }
+            }}
+            disabled={createDatabaseMutation.isLoading || !newDatabaseName.trim()}
+          >
+            {createDatabaseMutation.isLoading ? 'Creating...' : 'Create Database'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

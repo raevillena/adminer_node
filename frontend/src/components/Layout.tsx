@@ -32,6 +32,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
+import DatabaseTreeView from './DatabaseTreeView';
 
 const drawerWidth = 280;
 
@@ -135,35 +136,14 @@ export default function Layout({ children }: LayoutProps) {
 
       <Divider />
 
-      {/* Database Navigation */}
-      {state.currentDatabase && (
-        <Box>
-          <Box sx={{ p: 2, bgcolor: 'background.paper' }}>
-            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-              Database
-            </Typography>
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              {state.currentDatabase}
-            </Typography>
-          </Box>
-          <List dense>
-            <ListItem disablePadding>
-              <ListItemButton onClick={() => handleNavigation(`/database/${state.currentDatabase}`)}>
-                <ListItemIcon>
-                  <DatabaseIcon />
-                </ListItemIcon>
-                <ListItemText primary="Overview" />
-              </ListItemButton>
-            </ListItem>
-            <ListItem disablePadding>
-              <ListItemButton onClick={() => handleNavigation(`/database/${state.currentDatabase}/tables`)}>
-                <ListItemIcon>
-                  <TableIcon />
-                </ListItemIcon>
-                <ListItemText primary="Tables" />
-              </ListItemButton>
-            </ListItem>
-          </List>
+      {/* Database Tree View */}
+      {state.currentConnection && (
+        <Box sx={{ height: 'calc(100vh - 200px)', overflow: 'hidden' }}>
+          <DatabaseTreeView
+            connectionId={state.currentConnection.id}
+            currentDatabase={state.currentDatabase}
+            currentTable={state.currentTable}
+          />
         </Box>
       )}
     </Box>

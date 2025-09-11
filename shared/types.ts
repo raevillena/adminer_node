@@ -1,4 +1,4 @@
-// Database connection types
+// Database Connection Types
 export interface DatabaseConnection {
   id: string;
   name: string;
@@ -7,7 +7,7 @@ export interface DatabaseConnection {
   port: number;
   username: string;
   password: string;
-  database: string;
+  database?: string;
   ssl?: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -15,21 +15,22 @@ export interface DatabaseConnection {
 
 export interface ConnectionTest {
   success: boolean;
-  message?: string;
+  message: string;
   version?: string;
-  databases?: string[];
+  uptime?: number;
 }
 
-// Database metadata types
+// Database Types
 export interface Database {
   name: string;
   size?: number;
-  encoding?: string;
   collation?: string;
-  tables?: number;
-  views?: number;
+  encoding?: string;
+  tables: number;
+  views: number;
 }
 
+// Table Types
 export interface Table {
   name: string;
   type: 'table' | 'view';
@@ -38,27 +39,26 @@ export interface Table {
   rows?: number;
   size?: number;
   comment?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export interface Column {
   name: string;
   type: string;
-  nullable: boolean;
-  defaultValue?: string;
-  autoIncrement: boolean;
-  primaryKey: boolean;
+  null: boolean;
+  key: string;
+  default: any;
+  extra: string;
   comment?: string;
-  length?: number;
-  precision?: number;
-  scale?: number;
 }
 
 export interface Index {
   name: string;
-  type: 'PRIMARY' | 'UNIQUE' | 'INDEX' | 'FULLTEXT' | 'SPATIAL';
+  type: string;
   columns: string[];
   unique: boolean;
-  comment?: string;
+  primary: boolean;
 }
 
 export interface ForeignKey {
@@ -66,50 +66,47 @@ export interface ForeignKey {
   column: string;
   referencedTable: string;
   referencedColumn: string;
-  onUpdate: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
-  onDelete: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
+  onUpdate: string;
+  onDelete: string;
 }
 
 export interface Trigger {
   name: string;
-  event: 'INSERT' | 'UPDATE' | 'DELETE';
-  timing: 'BEFORE' | 'AFTER';
+  event: string;
+  timing: string;
   statement: string;
-  definer?: string;
 }
 
 export interface Constraint {
   name: string;
-  type: 'PRIMARY KEY' | 'UNIQUE' | 'FOREIGN KEY' | 'CHECK';
+  type: string;
   columns: string[];
   referencedTable?: string;
   referencedColumns?: string[];
 }
 
-// Data management types
+// Data Types
 export interface TableData {
-  columns: string[];
-  rows: Record<string, any>[];
+  columns: Column[];
+  rows: any[];
   totalRows: number;
   page: number;
-  pageSize: number;
-  totalPages: number;
+  limit: number;
 }
 
 export interface QueryResult {
   columns: string[];
-  rows: Record<string, any>[];
-  executionTime: number;
+  rows: any[];
   affectedRows?: number;
-  insertId?: number;
-  message?: string;
+  insertId?: any;
+  executionTime?: number;
 }
 
-// User management types
+// User Types
 export interface DatabaseUser {
   name: string;
   host: string;
-  privileges: string[];
+  privileges: UserPrivilege[];
   maxConnections?: number;
   maxUserConnections?: number;
   maxQuestions?: number;
@@ -124,30 +121,11 @@ export interface UserPrivilege {
   privileges: string[];
 }
 
-// Export/Import types
-export interface ExportOptions {
-  format: 'sql' | 'csv' | 'json';
-  tables?: string[];
-  dataOnly?: boolean;
-  schemaOnly?: boolean;
-  dropTables?: boolean;
-  createTables?: boolean;
-  insertData?: boolean;
-}
-
-export interface ImportResult {
-  success: boolean;
-  message: string;
-  importedRows?: number;
-  errors?: string[];
-}
-
-// Server info types
+// Server Types
 export interface ServerInfo {
   version: string;
   uptime: number;
-  status: 'online' | 'offline';
-  variables: Record<string, string>;
+  status: string;
   processes: Process[];
 }
 
@@ -162,66 +140,43 @@ export interface Process {
   info?: string;
 }
 
-// API Response types
+// API Response Types
 export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
   message?: string;
-  error?: string;
+  errors?: any[];
 }
 
 export interface PaginatedResponse<T = any> extends ApiResponse<T[]> {
   pagination: {
     page: number;
-    pageSize: number;
+    limit: number;
     total: number;
     totalPages: number;
   };
 }
 
-// Query history types
-export interface QueryHistory {
-  id: string;
-  connectionId: string;
-  query: string;
-  executionTime: number;
-  executedAt: Date;
-  success: boolean;
-  error?: string;
-}
-
-export interface SavedQuery {
-  id: string;
-  name: string;
-  query: string;
-  connectionId: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-// UI State types
-export interface AppState {
-  currentConnection: DatabaseConnection | null;
-  currentDatabase: string | null;
-  currentTable: string | null;
-  sidebarOpen: boolean;
-  theme: 'light' | 'dark';
-  queryTabs: QueryTab[];
-  activeQueryTab: string | null;
-}
-
-export interface QueryTab {
-  id: string;
-  name: string;
-  query: string;
-  result?: QueryResult;
-  isDirty: boolean;
-}
-
-// Error types
+// Error Types
 export interface DatabaseError {
   code: string;
   message: string;
   sqlState?: string;
-  errno?: number;
+}
+
+// Export Types
+export interface ExportOptions {
+  format: 'sql' | 'csv' | 'json' | 'xml' | 'tsv';
+  tables: string[];
+  data: boolean;
+  structure: boolean;
+  drop: boolean;
+  charset?: string;
+}
+
+export interface ImportResult {
+  success: boolean;
+  message: string;
+  importedRows?: number;
+  errors?: string[];
 }
