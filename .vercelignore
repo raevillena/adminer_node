@@ -1,0 +1,29 @@
+# Ignore backend files for Vercel deployment
+backend/
+node_modules/
+*.log
+.env
+.env.local
+.env.production.local
+.env.development.local
+
+# Ignore development files
+*.md
+.git/
+.gitignore
+README.md
+DEPLOYMENT.md
+
+# Ignore deployment files
+docker-compose*.yml
+Dockerfile
+nginx*.conf
+ecosystem.config.js
+deploy.sh
+deploy.bat
+
+# Ignore test files
+**/*.test.js
+**/*.test.ts
+**/*.spec.js
+**/*.spec.ts
