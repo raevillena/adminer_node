@@ -15,6 +15,18 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          mui: ['@mui/material', '@mui/icons-material'],
+          codemirror: ['@uiw/react-codemirror', '@codemirror/lang-sql'],
+        },
+      },
+    },
+  },
+  define: {
+    'process.env': {},
   },
 })

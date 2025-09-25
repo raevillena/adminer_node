@@ -79,7 +79,7 @@ interface ServerInfo {
 
 // Create axios instance with base configuration
 const api: AxiosInstance = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
