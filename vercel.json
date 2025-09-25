@@ -17,10 +17,5 @@
   ],
   "env": {
     "NODE_ENV": "production"
-  },
-  "functions": {
-    "backend/src/index.ts": {
-      "runtime": "nodejs18.x"
-    }
   }
 }
