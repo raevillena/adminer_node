@@ -96,6 +96,18 @@ export default function QueryPage() {
     }
   );
 
+  // Fetch available tables for the current database
+  const { data: availableTables = [] } = useQuery(
+    ['tables', state.currentDatabase],
+    () => apiService.tables.getAll(state.currentDatabase || ''),
+    {
+      enabled: !!state.currentConnection && !!state.currentDatabase,
+      onError: (error: any) => {
+        console.warn('Failed to load tables:', error);
+      },
+    }
+  );
+
   // Execute query mutation
   const executeQueryMutation = useMutation(
     ({ query, confirmDangerous }: { query: string; confirmDangerous?: boolean }) =>
@@ -287,18 +299,27 @@ export default function QueryPage() {
           >
             {state.queryTabs.map((tab, index) => (
               <Tab
-                key={tab.id}
+                key={`tab-${tab.id}-${index}`}
                 label={
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <span>{tab.name}</span>
                     {tab.isDirty && <Chip label="*" size="small" color="warning" />}
-                    <IconButton
-                      size="small"
-                      onClick={(e) => handleTabClose(e, index)}
-                      sx={{ ml: 1 }}
+                    <Box
+                      component="span"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleTabClose(e, index);
+                      }}
+                      sx={{ 
+                        ml: 1, 
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        '&:hover': { opacity: 0.7 }
+                      }}
                     >
                       <CloseIcon fontSize="small" />
-                    </IconButton>
+                    </Box>
                   </Box>
                 }
               />
@@ -310,7 +331,7 @@ export default function QueryPage() {
       {/* Query Editor and Results */}
       <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
         {state.queryTabs.map((tab, index) => (
-          <TabPanel key={tab.id} value={activeTab} index={index}>
+          <TabPanel key={`tab-${tab.id}-${index}`} value={activeTab} index={index}>
             <Grid container spacing={2} sx={{ height: '100%' }}>
               {/* SQL Editor */}
               <Grid item xs={12} md={6}>
@@ -327,7 +348,9 @@ export default function QueryPage() {
                       isLoading={executeQueryMutation.isLoading}
                       suggestions={suggestions}
                       onSuggestionSelect={handleSuggestionSelect}
-                      height="calc(100vh - 300px)"
+                      height="calc(100vh - 400px)"
+                      currentDatabase={state.currentDatabase || undefined}
+                      availableTables={availableTables}
                     />
                   </CardContent>
                 </Card>
@@ -465,11 +488,16 @@ export default function QueryPage() {
           ) : (
             <List>
               {queryHistory.map((query, index) => (
-                <React.Fragment key={index}>
+                <React.Fragment key={`history-${index}-${query.executedAt}`}>
                   <ListItem
-                    button
+                    component="div"
                     onClick={() => loadQueryFromHistory(query.query)}
-                    sx={{ flexDirection: 'column', alignItems: 'flex-start' }}
+                    sx={{ 
+                      flexDirection: 'column', 
+                      alignItems: 'flex-start',
+                      cursor: 'pointer',
+                      '&:hover': { backgroundColor: 'action.hover' }
+                    }}
                   >
                     <ListItemText
                       primary={query.query}

@@ -107,15 +107,16 @@ router.post('/', [
   body('name').notEmpty().withMessage('Username is required'),
   body('password').notEmpty().withMessage('Password is required'),
   body('host').optional().isString().withMessage('Host must be a string'),
-], async (req: Request, res: Response) => {
+], async (req: Request, res: Response): Promise<void> => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: 'Validation failed',
         errors: errors.array(),
       });
+      return;
     }
 
     const connectionId = req.user?.connectionId;
@@ -159,15 +160,16 @@ router.post('/:username/privileges', [
   body('privileges').isArray().withMessage('Privileges must be an array'),
   body('database').optional().isString().withMessage('Database must be a string'),
   body('table').optional().isString().withMessage('Table must be a string'),
-], async (req: Request, res: Response) => {
+], async (req: Request, res: Response): Promise<void> => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: 'Validation failed',
         errors: errors.array(),
       });
+      return;
     }
 
     const connectionId = req.user?.connectionId;
@@ -194,7 +196,7 @@ router.post('/:username/privileges', [
     // Filter out global-only privileges when granting at database/table level
     const globalOnlyPrivileges = ['SHUTDOWN', 'RELOAD', 'PROCESS', 'FILE', 'REPLICATION CLIENT', 'REPLICATION SLAVE', 'CREATE USER'];
     if (database || table) {
-      filteredPrivileges = filteredPrivileges.filter(priv => !globalOnlyPrivileges.includes(priv));
+      filteredPrivileges = filteredPrivileges.filter((priv: string) => !globalOnlyPrivileges.includes(priv));
     }
     
     if (filteredPrivileges.length === 0) {

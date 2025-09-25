@@ -1,5 +1,25 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Box, Paper, IconButton, Tooltip, Chip, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
+import { 
+  Box, 
+  Paper, 
+  IconButton, 
+  Tooltip, 
+  Chip, 
+  Menu, 
+  MenuItem, 
+  ListItemIcon, 
+  ListItemText,
+  Button,
+  ButtonGroup,
+  Divider,
+  Typography,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Grid,
+  Card,
+  CardContent,
+} from '@mui/material';
 import {
   PlayArrow as ExecuteIcon,
   Save as SaveIcon,
@@ -8,6 +28,16 @@ import {
   ContentCopy as CopyIcon,
   FormatListBulleted as FormatIcon,
   KeyboardArrowDown as ArrowDownIcon,
+  TableChart as TableIcon,
+  ViewColumn as ColumnIcon,
+  Functions as FunctionIcon,
+  Add as AddIcon,
+  Search as SearchIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  InsertChart as InsertIcon,
+  ExpandMore as ExpandMoreIcon,
+  Code as CodeIcon,
 } from '@mui/icons-material';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql } from '@codemirror/lang-sql';
@@ -35,6 +65,14 @@ interface SqlEditorProps {
   height?: string | number;
   readOnly?: boolean;
   placeholder?: string;
+  currentDatabase?: string;
+  availableTables?: Array<{
+    name: string;
+    columns?: Array<{
+      name: string;
+      type: string;
+    }>;
+  }>;
 }
 
 export default function SqlEditor({
@@ -52,6 +90,8 @@ export default function SqlEditor({
   height = '400px',
   readOnly = false,
   placeholder = 'Enter your SQL query here...',
+  currentDatabase,
+  availableTables = [],
 }: SqlEditorProps) {
   const theme = useTheme();
   const editorRef = useRef<any>(null);
@@ -61,14 +101,62 @@ export default function SqlEditor({
   const isDark = theme.palette.mode === 'dark';
 
   // CodeMirror extensions
-  const extensions = [
-    sql({
-      dialect: 'mysql', // Works for both MySQL and MariaDB
-      upperCaseKeywords: true,
-    }),
-    // Add autocomplete
-    // Add line numbers
-    // Add bracket matching
+  const extensions = React.useMemo(() => {
+    try {
+      return [
+        sql({
+          dialect: 'mysql', // Works for both MySQL and MariaDB
+          upperCaseKeywords: true,
+        }),
+        // Add autocomplete
+        // Add line numbers
+        // Add bracket matching
+      ];
+    } catch (error) {
+      console.warn('Failed to load SQL extension:', error);
+      return [];
+    }
+  }, []);
+
+  // SQL Templates and Macros
+  const sqlTemplates = {
+    selectAll: (tableName: string) => `SELECT * FROM ${tableName};`,
+    selectCount: (tableName: string) => `SELECT COUNT(*) FROM ${tableName};`,
+    selectWithLimit: (tableName: string) => `SELECT * FROM ${tableName} LIMIT 10;`,
+    selectWithWhere: (tableName: string) => `SELECT * FROM ${tableName} WHERE id = 1;`,
+    selectWithJoin: (table1: string, table2: string) => 
+      `SELECT t1.*, t2.* 
+FROM ${table1} t1 
+INNER JOIN ${table2} t2 ON t1.id = t2.${table1}_id;`,
+    insert: (tableName: string) => `INSERT INTO ${tableName} (column1, column2) VALUES ('value1', 'value2');`,
+    update: (tableName: string) => `UPDATE ${tableName} SET column1 = 'new_value' WHERE id = 1;`,
+    delete: (tableName: string) => `DELETE FROM ${tableName} WHERE id = 1;`,
+    createTable: (tableName: string) => `CREATE TABLE ${tableName} (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  name VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);`,
+    describeTable: (tableName: string) => `DESCRIBE ${tableName};`,
+    showTables: () => `SHOW TABLES;`,
+    showDatabases: () => `SHOW DATABASES;`,
+    showColumns: (tableName: string) => `SHOW COLUMNS FROM ${tableName};`,
+  };
+
+  // Common SQL keywords and functions
+  const sqlKeywords = [
+    'SELECT', 'FROM', 'WHERE', 'ORDER BY', 'GROUP BY', 'HAVING', 'LIMIT', 'OFFSET',
+    'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TRUNCATE',
+    'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'FULL OUTER JOIN', 'CROSS JOIN',
+    'UNION', 'UNION ALL', 'DISTINCT', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX',
+    'AND', 'OR', 'NOT', 'IN', 'BETWEEN', 'LIKE', 'IS NULL', 'IS NOT NULL',
+    'ASC', 'DESC', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END'
+  ];
+
+  const sqlFunctions = [
+    'COUNT()', 'SUM()', 'AVG()', 'MIN()', 'MAX()', 'CONCAT()', 'SUBSTRING()',
+    'LENGTH()', 'UPPER()', 'LOWER()', 'TRIM()', 'DATE()', 'NOW()', 'CURDATE()',
+    'CURTIME()', 'YEAR()', 'MONTH()', 'DAY()', 'HOUR()', 'MINUTE()', 'SECOND()',
+    'IFNULL()', 'COALESCE()', 'CAST()', 'CONVERT()', 'ROUND()', 'FLOOR()', 'CEIL()'
   ];
 
   const handleExecute = () => {
@@ -147,9 +235,44 @@ export default function SqlEditor({
     onFormat?.(formatted);
   };
 
+  // Insert text at cursor position
+  const insertText = (text: string) => {
+    const currentValue = value;
+    const cursorPosition = editorRef.current?.view?.state?.selection?.main?.head || currentValue.length;
+    const newValue = currentValue.slice(0, cursorPosition) + text + currentValue.slice(cursorPosition);
+    onChange(newValue);
+  };
+
+  // Insert SQL template
+  const insertTemplate = (template: string) => {
+    const currentValue = value;
+    const newValue = currentValue + (currentValue ? '\n\n' : '') + template;
+    onChange(newValue);
+  };
+
+  // Insert table name
+  const insertTableName = (tableName: string) => {
+    insertText(tableName);
+  };
+
+  // Insert column name
+  const insertColumnName = (columnName: string) => {
+    insertText(columnName);
+  };
+
+  // Insert SQL keyword
+  const insertKeyword = (keyword: string) => {
+    insertText(keyword + ' ');
+  };
+
+  // Insert SQL function
+  const insertFunction = (func: string) => {
+    insertText(func);
+  };
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Toolbar */}
+      {/* Main Toolbar */}
       <Box
         sx={{
           display: 'flex',
@@ -202,37 +325,33 @@ export default function SqlEditor({
           </IconButton>
         </Tooltip>
 
-        <Box sx={{ flexGrow: 1 }} />
+        <Divider orientation="vertical" flexItem />
 
-        {/* Suggestions Menu */}
-        {suggestions && (
-          <>
-            <Chip
-              label="Keywords"
-              size="small"
-              onClick={() => handleSuggestionClick('keywords')}
-              variant={suggestionType === 'keywords' ? 'filled' : 'outlined'}
-            />
-            <Chip
-              label="Tables"
-              size="small"
-              onClick={() => handleSuggestionClick('tables')}
-              variant={suggestionType === 'tables' ? 'filled' : 'outlined'}
-            />
-            <Chip
-              label="Columns"
-              size="small"
-              onClick={() => handleSuggestionClick('columns')}
-              variant={suggestionType === 'columns' ? 'filled' : 'outlined'}
-            />
-            <Chip
-              label="Functions"
-              size="small"
-              onClick={() => handleSuggestionClick('functions')}
-              variant={suggestionType === 'functions' ? 'filled' : 'outlined'}
-            />
-          </>
-        )}
+        {/* Quick SQL Templates */}
+        <ButtonGroup size="small" variant="outlined">
+          <Tooltip title="SELECT * FROM table">
+            <Button onClick={() => insertTemplate(sqlTemplates.selectAll('table_name'))} startIcon={<SearchIcon />}>
+              SELECT
+            </Button>
+          </Tooltip>
+          <Tooltip title="INSERT INTO table">
+            <Button onClick={() => insertTemplate(sqlTemplates.insert('table_name'))} startIcon={<InsertIcon />}>
+              INSERT
+            </Button>
+          </Tooltip>
+          <Tooltip title="UPDATE table">
+            <Button onClick={() => insertTemplate(sqlTemplates.update('table_name'))} startIcon={<EditIcon />}>
+              UPDATE
+            </Button>
+          </Tooltip>
+          <Tooltip title="DELETE FROM table">
+            <Button onClick={() => insertTemplate(sqlTemplates.delete('table_name'))} startIcon={<DeleteIcon />}>
+              DELETE
+            </Button>
+          </Tooltip>
+        </ButtonGroup>
+
+        <Box sx={{ flexGrow: 1 }} />
 
         {/* Result Status */}
         {result && (
@@ -252,6 +371,141 @@ export default function SqlEditor({
             variant="outlined"
           />
         )}
+      </Box>
+
+      {/* Suggestive Buttons Panel */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
+        <Accordion defaultExpanded>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CodeIcon fontSize="small" />
+              Quick Insert & Templates
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails sx={{ pt: 0 }}>
+            <Grid container spacing={2}>
+              {/* Tables */}
+              {availableTables.length > 0 && (
+                <Grid item xs={12} md={6}>
+                  <Card variant="outlined" sx={{ height: '100%' }}>
+                    <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                      <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <TableIcon fontSize="small" />
+                        Tables ({availableTables.length})
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, maxHeight: 120, overflow: 'auto' }}>
+                        {availableTables.map((table) => (
+                          <Chip
+                            key={table.name}
+                            label={table.name}
+                            size="small"
+                            onClick={() => insertTableName(table.name)}
+                            variant="outlined"
+                            sx={{ cursor: 'pointer' }}
+                          />
+                        ))}
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              )}
+
+              {/* SQL Keywords */}
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined" sx={{ height: '100%' }}>
+                  <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                    <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <CodeIcon fontSize="small" />
+                      Keywords
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, maxHeight: 120, overflow: 'auto' }}>
+                      {sqlKeywords.slice(0, 20).map((keyword) => (
+                        <Chip
+                          key={keyword}
+                          label={keyword}
+                          size="small"
+                          onClick={() => insertKeyword(keyword)}
+                          variant="outlined"
+                          sx={{ cursor: 'pointer' }}
+                        />
+                      ))}
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* SQL Functions */}
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined" sx={{ height: '100%' }}>
+                  <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                    <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <FunctionIcon fontSize="small" />
+                      Functions
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, maxHeight: 120, overflow: 'auto' }}>
+                      {sqlFunctions.slice(0, 15).map((func) => (
+                        <Chip
+                          key={func}
+                          label={func}
+                          size="small"
+                          onClick={() => insertFunction(func)}
+                          variant="outlined"
+                          sx={{ cursor: 'pointer' }}
+                        />
+                      ))}
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Quick Templates */}
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined" sx={{ height: '100%' }}>
+                  <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                    <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <AddIcon fontSize="small" />
+                      Quick Templates
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, maxHeight: 120, overflow: 'auto' }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => insertTemplate(sqlTemplates.showTables())}
+                        sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+                      >
+                        SHOW TABLES
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => insertTemplate(sqlTemplates.showDatabases())}
+                        sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+                      >
+                        SHOW DATABASES
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => insertTemplate(sqlTemplates.describeTable('table_name'))}
+                        sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+                      >
+                        DESCRIBE TABLE
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => insertTemplate(sqlTemplates.selectCount('table_name'))}
+                        sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+                      >
+                        COUNT ROWS
+                      </Button>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </AccordionDetails>
+        </Accordion>
       </Box>
 
       {/* Editor */}
