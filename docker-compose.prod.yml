@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_URL=https://yourdomain.com/api
+    volumes:
+      - ./ssl:/etc/nginx/ssl:ro
+    networks:
+      - adminer-network
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - JWT_SECRET=${JWT_SECRET}
+      - CORS_ORIGIN=https://yourdomain.com
+    volumes:
+      - ./backend/.env:/app/.env
+      - ./logs:/app/logs
+    networks:
+      - adminer-network
+    restart: unless-stopped
+
+  # Nginx reverse proxy with SSL
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx-prod.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - adminer-network
+    restart: unless-stopped
+
+networks:
+  adminer-network:
+    driver: bridge
